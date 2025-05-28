@@ -18,6 +18,7 @@ async function scanXSS(targetUrl) {
 
     const vulnerabilities = new Set();
 
+    // Use existing params or fallback common params
     const paramsToTest = baseParams.length > 0
       ? [...new Set(baseParams.map(([param]) => param))]
       : commonParams;
@@ -28,9 +29,15 @@ async function scanXSS(targetUrl) {
         testUrl.searchParams.set(param, payload);
 
         try {
-          const response = await axios.get(testUrl.toString(), { timeout: 5000 });
+          const response = await axios.get(testUrl.toString(), {
+            timeout: 5000,
+            headers: {
+              'User-Agent': 'BreachPointScanner/1.0'
+            }
+          });
 
           if (response.data && response.data.includes(payload)) {
+            // Use JSON.stringify on object for Set uniqueness
             vulnerabilities.add(JSON.stringify({
               type: "XSS",
               endpoint: testUrl.pathname + testUrl.search,
@@ -43,12 +50,16 @@ async function scanXSS(targetUrl) {
             break; // Stop testing this param after finding a hit
           }
         } catch (err) {
-          // Ignore network errors to continue testing others
+          // Log and continue testing other params/payloads
           console.warn(`Failed to test ${testUrl.toString()}:`, err.message);
         }
+
+        // Optional delay to reduce server load, uncomment if needed
+        // await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
+    // Return array of parsed vulnerability objects
     return [...vulnerabilities].map(v => JSON.parse(v));
   } catch (error) {
     console.error("XSS scanner error:", error.message);

@@ -20,13 +20,14 @@ async function crawlSite(baseUrl, maxDepth = 1) {
       const dom = new JSDOM(response.data);
       const document = dom.window.document;
 
-      const elements = [
-        ...document.querySelectorAll('a[href]'),
-        ...document.querySelectorAll('form[action]')
-      ];
+      // Collect all anchor hrefs
+      const anchors = [...document.querySelectorAll('a[href]')];
+      // Collect all forms
+      const forms = [...document.querySelectorAll('form[action]')];
 
-      for (const el of elements) {
-        const href = el.getAttribute('href') || el.getAttribute('action');
+      // Process anchors
+      for (const anchor of anchors) {
+        const href = anchor.getAttribute('href');
         if (!href || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('#')) continue;
 
         let normalizedUrl;
@@ -41,6 +42,39 @@ async function crawlSite(baseUrl, maxDepth = 1) {
           !visited.has(normalizedUrl)
         ) {
           toVisit.push({ link: normalizedUrl, depth: depth + 1 });
+        }
+      }
+
+      // Process forms (simulate GET submission)
+      for (const form of forms) {
+        const action = form.getAttribute('action') || link;
+        let method = (form.getAttribute('method') || 'GET').toUpperCase();
+
+        if (method !== 'GET') {
+          // Skip non-GET forms for now to keep crawler simple
+          continue;
+        }
+
+        let formUrl;
+        try {
+          formUrl = new URL(action, link);
+        } catch {
+          continue;
+        }
+
+        // Collect input names and assign test values
+        const inputs = [...form.querySelectorAll('input[name], select[name], textarea[name]')];
+        for (const input of inputs) {
+          // Use a simple test value
+          formUrl.searchParams.set(input.getAttribute('name'), 'test');
+        }
+
+        const formLink = formUrl.toString();
+        if (
+          formLink.startsWith(baseUrl) &&
+          !visited.has(formLink)
+        ) {
+          toVisit.push({ link: formLink, depth: depth + 1 });
         }
       }
     } catch (error) {

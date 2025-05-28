@@ -4,6 +4,26 @@ const scanXSS = require('../scanners/xssScanner');
 const scanDomXSS = require('../scanners/xssDomScanner');
 const { crawlSite } = require('../utils/crawler');
 
+// Simple concurrency helper to limit parallel promises
+async function asyncPool(poolLimit, array, iteratorFn) {
+  const ret = [];
+  const executing = new Set();
+
+  for (const item of array) {
+    const p = Promise.resolve().then(() => iteratorFn(item));
+    ret.push(p);
+
+    executing.add(p);
+    const clean = () => executing.delete(p);
+    p.then(clean).catch(clean);
+
+    if (executing.size >= poolLimit) {
+      await Promise.race(executing);
+    }
+  }
+  return Promise.all(ret);
+}
+
 router.post('/', async (req, res) => {
   const { url } = req.body;
 
@@ -14,26 +34,30 @@ router.post('/', async (req, res) => {
   try {
     const discoveredUrls = await crawlSite(url);
 
-    // Ensure the base URL is included
     if (!discoveredUrls.includes(url)) {
       discoveredUrls.unshift(url);
     }
 
     let allVulnerabilities = [];
 
-    // Scan each discovered URL
-    for (const link of discoveredUrls) {
+    // Use concurrency limit, e.g., 5 URLs at a time
+    const concurrencyLimit = 5;
+
+    const scanResults = await asyncPool(concurrencyLimit, discoveredUrls, async (link) => {
       try {
         const [reflected, domBased] = await Promise.all([
           scanXSS(link),
           scanDomXSS(link)
         ]);
-
-        allVulnerabilities.push(...reflected, ...domBased);
+        return [...reflected, ...domBased];
       } catch (scanError) {
         console.warn(`Scan failed for ${link}:`, scanError.message);
+        return [];
       }
-    }
+    });
+
+    // Flatten array of arrays into a single array
+    allVulnerabilities = scanResults.flat();
 
     // Remove duplicates based on endpoint + type
     const seen = new Set();
